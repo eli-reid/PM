@@ -1,56 +1,56 @@
-import sqlite3
 
-from psutil import cpu_percent
+import sqlite3
 from .RmThread import RmThread
 from .Resources import Resources
 from time import sleep
-from datetime import datetime
-import json
+from datetime import datetime, timedelta
 
 class ResourceMonitor:
-    
-    def __init__(self, DB_Name:str="ResourceMonitor.db") -> None:
-        self.__db = DB_Name
-        self.__thread = RmThread(target=self.log)
-        self.resources = Resources()
-        self.__Build_table()
+    """ Resource Monitor - creates new thread for logging system reources!
+        log_file: if is None database stores in memory 
+        log_size in MB 
+
+    """
+    def __init__(self, log_file: str=None, log_size: int=50,) -> None:
+        self.__log_file: str = ":memory:" if log_file is None else log_file
+        self.__log_size: int = log_size * 1000000 # convert bytes to MB
+        self.__thread: RmThread = RmThread(target=self.__log)
+        self.__resources: Resources = Resources()
+        self.__dbcon = sqlite3.connect(self.__log_file, check_same_thread=False)
         self.__kill: bool = False
-    
-    def log(self) -> None:
-        while not self.__kill:
-            db = sqlite3.connect(self.__db)
-            q = f"""INSERT INTO {self.__thread.name}
-                                    (TIME, DATA)
-                                    VALUES (?,?);"""
-            
-            db.execute(q,[datetime.now(),str(self.resources.CPU.cpu_percent)])
-            db.commit()
-            db.close()
-            sleep(self.__thread.id+1)
+        self.__Build_table()
+
+    def __log(self) -> None:
+        __LOG_SQL_INSERT_STR: str = f"INSERT INTO {self.__thread.name} (TIME, CPU_U, MEM_U) VALUES (?,?,?);"
+        __LOG_SQL_DELETE_STR: str = f"DELETE FROM {self.__thread.name} WHERE TIME < ?"
+
+        while not self.__kill: 
+            try:
+                size = self.__dbcon.execute('PRAGMA page_size;').fetchone()[0] * self.__dbcon.execute('PRAGMA page_count').fetchone()[0]
+                if  size > self.__log_size : 
+                    t: int = datetime.now().timestamp() - timedelta(days=10).seconds
+                    self.__dbcon.execute(__LOG_SQL_DELETE_STR, [t])
+                    self.__dbcon.commit()
+                self.__dbcon.execute(__LOG_SQL_INSERT_STR, [datetime.now().timestamp(), self.__resources.CPU.percent, self.__resources.memory.percent])
+                self.__dbcon.commit()
+                sleep(.001)
+            except Exception as e:
+                pass
 
     def __Build_table(self) -> None:
-        db = sqlite3.connect(self.__db)
-        cursor = db.cursor()
-        cursor.execute(f"""CREATE TABLE IF NOT EXISTS {self.__thread.name}(
-                        ID      INTEGER PRIMARY KEY AUTOINCREMENT,
-                        TIME    DATETIME            NOT NULL,
-                        DATA    JSON              NOT NULL
-                        );""")
-        db.close
-    
+        self.__dbcon.execute(f"CREATE TABLE IF NOT EXISTS {self.__thread.name}(\
+                        TIME   INTEGER PRIMARY KEY,\
+                        CPU_U   INTEGER,\
+                        MEM_U   INTEGER\
+                        )WITHOUT ROWID;")
+       
     def start(self) -> None:
         self.__kill  = False
         self.__thread.start()
     
-    def stop(self):
+    def stop(self) -> None:
         self.__kill = True
-    
+
     @property
-    def getThreads(self):
-        return RmThread._threads
-        
-
-
-
-       
-
+    def getThreads(self) -> list:
+        return self.__thread.threads

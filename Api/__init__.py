@@ -1,3 +1,4 @@
+import sqlite3
 from Api import Resouce_Monitor
 from Api.Resouce_Monitor.ResourceMonitor import ResourceMonitor
 from flask import Flask, render_template
@@ -11,7 +12,6 @@ def create_app(testing=False):
     app = Flask(__name__)
     app.config['SECRET_KEY'] = 'secret!'
     
-   
     CORS(app)
 
     with app.app_context():
